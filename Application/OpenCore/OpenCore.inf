@@ -56,5 +56,6 @@
   gOcInterfaceProtocolGuid            ## SOMETIMES_CONSUMES
 
 [LibraryClasses]
+  BaseLib
   OcMainLib
   UefiApplicationEntryPoint

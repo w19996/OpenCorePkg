@@ -1319,6 +1319,8 @@
 			<false/>
 			<key>ApECID</key>
 			<integer>0</integer>
+			<key>ApplyAppleSupportOnly</key>
+			<false/>
 			<key>AuthRestart</key>
 			<false/>
 			<key>BlacklistAppleUpdate</key>

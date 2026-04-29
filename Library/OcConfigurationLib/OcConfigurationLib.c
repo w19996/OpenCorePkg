@@ -444,6 +444,7 @@ OC_SCHEMA
   mMiscConfigurationSecuritySchema[] = {
   OC_SCHEMA_BOOLEAN_IN ("AllowSetDefault",      OC_GLOBAL_CONFIG, Misc.Security.AllowSetDefault),
   OC_SCHEMA_INTEGER_IN ("ApECID",               OC_GLOBAL_CONFIG, Misc.Security.ApECID),
+  OC_SCHEMA_BOOLEAN_IN ("ApplyAppleSupportOnly", OC_GLOBAL_CONFIG, Misc.Security.ApplyAppleSupportOnly),
   OC_SCHEMA_BOOLEAN_IN ("AuthRestart",          OC_GLOBAL_CONFIG, Misc.Security.AuthRestart),
   OC_SCHEMA_BOOLEAN_IN ("BlacklistAppleUpdate", OC_GLOBAL_CONFIG, Misc.Security.BlacklistAppleUpdate),
   OC_SCHEMA_STRING_IN ("DmgLoading",            OC_GLOBAL_CONFIG, Misc.Security.DmgLoading),

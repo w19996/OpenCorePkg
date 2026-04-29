@@ -384,6 +384,7 @@ typedef enum {
   _(UINT32                      , ScanPolicy                  ,      , OC_SCAN_DEFAULT_POLICY  , ()) \
   _(UINT32                      , ExposeSensitiveData         ,      , OCS_EXPOSE_VERSION      , ()) \
   _(BOOLEAN                     , AllowSetDefault             ,      , FALSE                   , ()) \
+  _(BOOLEAN                     , ApplyAppleSupportOnly       ,      , FALSE                   , ()) \
   _(BOOLEAN                     , AuthRestart                 ,      , FALSE                   , ()) \
   _(BOOLEAN                     , BlacklistAppleUpdate        ,      , FALSE                   , ()) \
   _(BOOLEAN                     , EnablePassword              ,      , FALSE                   , ()) \

@@ -24,6 +24,7 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 
 #include <Library/OcMainLib.h>
 
+#include <Library/BaseLib.h>
 #include <Library/DebugLib.h>
 #include <Library/OcDebugLogLib.h>
 #include <Library/DevicePathLib.h>
@@ -67,6 +68,10 @@ OC_PRIVILEGE_CONTEXT
   mOpenCorePrivilege;
 
 STATIC
+BOOLEAN
+  mOpenCoreAppleSupportLoaded;
+
+STATIC
 EFI_HANDLE
   mStorageHandle;
 
@@ -77,6 +82,100 @@ EFI_DEVICE_PATH_PROTOCOL *
 STATIC
 CHAR16 *
   mStorageRoot;
+
+STATIC
+BOOLEAN
+OcFlavourHasApple (
+  IN CONST CHAR8  *Flavour OPTIONAL
+  )
+{
+  CONST CHAR8  *Token;
+  CONST CHAR8  *End;
+  UINTN        AppleLen;
+
+  if (Flavour == NULL) {
+    return FALSE;
+  }
+
+  AppleLen = AsciiStrLen (OC_FLAVOUR_APPLE_OS);
+  Token    = Flavour;
+
+  while (*Token != '\0') {
+    End = Token;
+    while ((*End != '\0') && (*End != ':')) {
+      ++End;
+    }
+
+    if (  ((UINTN)(End - Token) == AppleLen)
+       && (AsciiStrnCmp (Token, OC_FLAVOUR_APPLE_OS, AppleLen) == 0))
+    {
+      return TRUE;
+    }
+
+    Token = (*End == ':') ? End + 1 : End;
+  }
+
+  return FALSE;
+}
+
+STATIC
+BOOLEAN
+OcIsAppleBootEntry (
+  IN OC_BOOT_ENTRY  *Chosen OPTIONAL
+  )
+{
+  OC_BOOT_ENTRY_TYPE  DevicePathType;
+
+  if (Chosen == NULL) {
+    return FALSE;
+  }
+
+  if ((Chosen->Type & OC_BOOT_APPLE_ANY) != 0) {
+    return TRUE;
+  }
+
+  if (Chosen->DevicePath != NULL) {
+    DevicePathType = OcGetBootDevicePathType (Chosen->DevicePath, NULL, NULL);
+    if ((DevicePathType & OC_BOOT_APPLE_ANY) != 0) {
+      return TRUE;
+    }
+  }
+
+  return OcFlavourHasApple (Chosen->Flavour);
+}
+
+STATIC
+VOID
+OcLoadAppleSupport (
+  IN OC_BOOT_ENTRY  *Chosen OPTIONAL
+  )
+{
+  if (mOpenCoreAppleSupportLoaded) {
+    return;
+  }
+
+  if (  mOpenCoreConfiguration.Misc.Security.ApplyAppleSupportOnly
+     && !OcIsAppleBootEntry (Chosen))
+  {
+    DEBUG ((DEBUG_INFO, "OC: Skipping Apple support for non-Apple boot entry\n"));
+    return;
+  }
+
+  mOpenCoreAppleSupportLoaded = TRUE;
+
+  DEBUG ((DEBUG_INFO, "OC: OcLoadNvramSupport...\n"));
+  OcLoadNvramSupport (&mOpenCoreStorage, &mOpenCoreConfiguration);
+  DEBUG ((DEBUG_INFO, "OC: OcLoadAcpiSupport...\n"));
+  OcLoadAcpiSupport (&mOpenCoreStorage, &mOpenCoreConfiguration);
+  DEBUG ((DEBUG_INFO, "OC: OcLoadPlatformSupport...\n"));
+  OcLoadPlatformSupport (&mOpenCoreConfiguration, &mOpenCoreCpuInfo);
+  DEBUG ((DEBUG_INFO, "OC: OcLoadDevPropsSupport...\n"));
+  OcLoadDevPropsSupport (&mOpenCoreConfiguration);
+  DEBUG ((DEBUG_INFO, "OC: OcMiscLateInit...\n"));
+  OcMiscLateInit (&mOpenCoreStorage, &mOpenCoreConfiguration);
+  DEBUG ((DEBUG_INFO, "OC: OcLoadKernelSupport...\n"));
+  OcLoadKernelSupport (&mOpenCoreStorage, &mOpenCoreConfiguration, &mOpenCoreCpuInfo);
+}
 
 STATIC
 EFI_STATUS
@@ -91,6 +190,8 @@ OcStartImage (
 {
   EFI_STATUS                       Status;
   EFI_CONSOLE_CONTROL_SCREEN_MODE  OldMode;
+
+  OcLoadAppleSupport (Chosen);
 
   OldMode = OcConsoleControlSetMode (
               LaunchInText ? EfiConsoleControlScreenText : EfiConsoleControlScreenGraphics
@@ -134,8 +235,6 @@ OcMain (
 
   OcCpuScanProcessor (&mOpenCoreCpuInfo);
 
-  DEBUG ((DEBUG_INFO, "OC: OcLoadNvramSupport...\n"));
-  OcLoadNvramSupport (Storage, &mOpenCoreConfiguration);
   DEBUG ((DEBUG_INFO, "OC: OcMiscMiddleInit...\n"));
   OcMiscMiddleInit (
     Storage,
@@ -151,16 +250,12 @@ OcMain (
   DEBUG ((DEBUG_INFO, "OC: OcMiscLoadSystemReport...\n"));
   OcMiscLoadSystemReport (&mOpenCoreConfiguration, mStorageHandle);
   DEBUG_CODE_END ();
-  DEBUG ((DEBUG_INFO, "OC: OcLoadAcpiSupport...\n"));
-  OcLoadAcpiSupport (&mOpenCoreStorage, &mOpenCoreConfiguration);
-  DEBUG ((DEBUG_INFO, "OC: OcLoadPlatformSupport...\n"));
-  OcLoadPlatformSupport (&mOpenCoreConfiguration, &mOpenCoreCpuInfo);
-  DEBUG ((DEBUG_INFO, "OC: OcLoadDevPropsSupport...\n"));
-  OcLoadDevPropsSupport (&mOpenCoreConfiguration);
-  DEBUG ((DEBUG_INFO, "OC: OcMiscLateInit...\n"));
-  OcMiscLateInit (Storage, &mOpenCoreConfiguration);
-  DEBUG ((DEBUG_INFO, "OC: OcLoadKernelSupport...\n"));
-  OcLoadKernelSupport (&mOpenCoreStorage, &mOpenCoreConfiguration, &mOpenCoreCpuInfo);
+
+  if (mOpenCoreConfiguration.Misc.Security.ApplyAppleSupportOnly) {
+    DEBUG ((DEBUG_INFO, "OC: Deferring Apple support until Apple boot entry starts\n"));
+  } else {
+    OcLoadAppleSupport (NULL);
+  }
 
   if (mOpenCoreConfiguration.Misc.Security.EnablePassword) {
     mOpenCorePrivilege.CurrentLevel = OcPrivilegeUnauthorized;
