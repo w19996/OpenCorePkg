@@ -14,6 +14,7 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 
 #include <Uefi.h>
 
+#include <Guid/GlobalVariable.h>
 #include <Guid/OcVariable.h>
 
 #include <Protocol/DevicePath.h>
@@ -25,6 +26,7 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include <Library/OcMainLib.h>
 
 #include <Library/BaseLib.h>
+#include <Library/BaseMemoryLib.h>
 #include <Library/DebugLib.h>
 #include <Library/OcDebugLogLib.h>
 #include <Library/DevicePathLib.h>
@@ -42,6 +44,9 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include <Library/UefiRuntimeServicesTableLib.h>
 #include <Library/UefiDriverEntryPoint.h>
 #include <Library/UefiLib.h>
+
+#define OC_DEFAULT_BOOT_OPTION       0x80
+#define OC_DEFAULT_BOOT_OPTION_NAME  L"Boot0080"
 
 STATIC
 OC_GLOBAL_CONFIG
@@ -82,6 +87,33 @@ EFI_DEVICE_PATH_PROTOCOL *
 STATIC
 CHAR16 *
   mStorageRoot;
+
+STATIC
+EFI_DEVICE_PATH_PROTOCOL *
+OcGetLoadOptionDevicePath (
+  IN EFI_LOAD_OPTION  *LoadOption,
+  IN UINTN            LoadOptionSize
+  )
+{
+  UINTN  DescriptionSize;
+  UINTN  DevicePathOffset;
+
+  if (LoadOptionSize < sizeof (*LoadOption)) {
+    return NULL;
+  }
+
+  DescriptionSize = StrSize ((CHAR16 *)(LoadOption + 1));
+  DevicePathOffset = sizeof (*LoadOption) + DescriptionSize;
+
+  if (  (DevicePathOffset > LoadOptionSize)
+     || (LoadOption->FilePathListLength == 0)
+     || (LoadOption->FilePathListLength > LoadOptionSize - DevicePathOffset))
+  {
+    return NULL;
+  }
+
+  return (EFI_DEVICE_PATH_PROTOCOL *)((UINT8 *)LoadOption + DevicePathOffset);
+}
 
 STATIC
 BOOLEAN
@@ -145,6 +177,117 @@ OcIsAppleBootEntry (
 }
 
 STATIC
+BOOLEAN
+OcSameDevicePath (
+  IN EFI_DEVICE_PATH_PROTOCOL  *First,
+  IN EFI_DEVICE_PATH_PROTOCOL  *Second
+  )
+{
+  UINTN  FirstSize;
+  UINTN  SecondSize;
+
+  FirstSize  = GetDevicePathSize (First);
+  SecondSize = GetDevicePathSize (Second);
+
+  return (FirstSize == SecondSize) && (CompareMem (First, Second, FirstSize) == 0);
+}
+
+STATIC
+EFI_STATUS
+OcRemoveBootOrderEntry (
+  IN UINT16  BootOption
+  )
+{
+  EFI_STATUS  Status;
+  UINT16      *BootOrder;
+  UINTN       BootOrderSize;
+  UINTN       Index;
+  UINTN       NewCount;
+
+  Status = GetVariable2 (
+             EFI_BOOT_ORDER_VARIABLE_NAME,
+             &gEfiGlobalVariableGuid,
+             (VOID **)&BootOrder,
+             &BootOrderSize
+             );
+  if (EFI_ERROR (Status) || (BootOrderSize < sizeof (*BootOrder)) || (BootOrderSize % sizeof (*BootOrder) != 0)) {
+    return Status;
+  }
+
+  NewCount = 0;
+  for (Index = 0; Index < BootOrderSize / sizeof (*BootOrder); ++Index) {
+    if (BootOrder[Index] != BootOption) {
+      BootOrder[NewCount++] = BootOrder[Index];
+    }
+  }
+
+  if (NewCount == BootOrderSize / sizeof (*BootOrder)) {
+    FreePool (BootOrder);
+    return EFI_NOT_FOUND;
+  }
+
+  Status = gRT->SetVariable (
+                  EFI_BOOT_ORDER_VARIABLE_NAME,
+                  &gEfiGlobalVariableGuid,
+                  EFI_VARIABLE_BOOTSERVICE_ACCESS
+                  | EFI_VARIABLE_RUNTIME_ACCESS
+                  | EFI_VARIABLE_NON_VOLATILE,
+                  NewCount * sizeof (*BootOrder),
+                  BootOrder
+                  );
+
+  FreePool (BootOrder);
+  return Status;
+}
+
+STATIC
+EFI_STATUS
+OcRemoveGeneratedDefaultBootEntry (
+  IN OC_BOOT_ENTRY  *Chosen
+  )
+{
+  EFI_STATUS                Status;
+  EFI_LOAD_OPTION           *LoadOption;
+  EFI_DEVICE_PATH_PROTOCOL  *LoadOptionPath;
+  UINTN                     LoadOptionSize;
+
+  if ((Chosen == NULL) || (Chosen->DevicePath == NULL) || OcIsAppleBootEntry (Chosen)) {
+    return EFI_UNSUPPORTED;
+  }
+
+  Status = GetVariable2 (
+             OC_DEFAULT_BOOT_OPTION_NAME,
+             &gEfiGlobalVariableGuid,
+             (VOID **)&LoadOption,
+             &LoadOptionSize
+             );
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  LoadOptionPath = OcGetLoadOptionDevicePath (LoadOption, LoadOptionSize);
+  if ((LoadOptionPath == NULL) || !OcSameDevicePath (LoadOptionPath, Chosen->DevicePath)) {
+    FreePool (LoadOption);
+    return EFI_NOT_FOUND;
+  }
+
+  FreePool (LoadOption);
+
+  Status = gRT->SetVariable (
+                  OC_DEFAULT_BOOT_OPTION_NAME,
+                  &gEfiGlobalVariableGuid,
+                  0,
+                  0,
+                  NULL
+                  );
+  DEBUG ((DEBUG_INFO, "OC: Removing generated default boot option %s - %r\n", OC_DEFAULT_BOOT_OPTION_NAME, Status));
+
+  OcRemoveBootOrderEntry (OC_DEFAULT_BOOT_OPTION);
+
+  return EFI_SUCCESS;
+}
+
+STATIC
 VOID
 OcLoadAppleSupport (
   IN OC_BOOT_ENTRY  *Chosen OPTIONAL
@@ -190,6 +333,10 @@ OcStartImage (
 {
   EFI_STATUS                       Status;
   EFI_CONSOLE_CONTROL_SCREEN_MODE  OldMode;
+
+  if (mOpenCoreConfiguration.Misc.Security.ApplyAppleSupportOnly) {
+    OcRemoveGeneratedDefaultBootEntry (Chosen);
+  }
 
   OcLoadAppleSupport (Chosen);
 

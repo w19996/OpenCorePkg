@@ -44,6 +44,7 @@
   UefiCpuPkg/UefiCpuPkg.dec
 
 [Guids]
+  gEfiGlobalVariableGuid
   gOcVendorVariableGuid
 
 [Protocols]
@@ -57,5 +58,6 @@
 
 [LibraryClasses]
   BaseLib
+  BaseMemoryLib
   OcMainLib
   UefiApplicationEntryPoint
